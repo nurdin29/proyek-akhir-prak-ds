@@ -1,0 +1,186 @@
+---
+title: "ProyekAkhir"
+author: "Nurdin Abdul Aziz dan Pieter Alvaro"
+date: "21/11/2021"
+output: html_document
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(shiny)
+library(shinycustomloader)
+library(shinythemes)
+library(dplyr)
+library(tidyr)
+library(tm)
+library(mscstexta4r)
+library(textir)
+library(NLP)
+library(SnowballC)
+library(reprex)
+library(syuzhet)
+library(plotrix)
+library(caret)
+library(stringr)
+library(ROAuth)
+library(RColorBrewer)
+library(twitteR)
+library(rtweet)
+library(SentimentAnalysis)
+library(sentimentr)
+library(ggplot2)
+library(wordcloud)
+```
+
+## Membuat autentifikasi.
+```{r}
+api_key <- "SO9rhduadU1Nt551X8e0nJltR"
+api_secret <- "eap6Xabzkd5ScVZRnn05a7U5Lzpv2e9Qy4GBf9TnlQB7WJaVgI"
+access_token <- "1460076138651217920-vcViqIkHOaKyHlrgF9QJ0kJuqVwhgM"
+access_secret <- "OP8x2newL4XWsMOYkmvzXLrJnO8qFcj9wYQ0BShzNJ5SM"
+setup_twitter_oauth(api_key, api_secret, access_token, access_secret)
+```
+
+## Mengumpulkan tweet yang memiliki kata kunci "bisnis pcr pemerintah".
+```{r}
+twet = searchTwitter('Bisnis PCR pemerintah', n = 1000, lang = "id")
+bisnispcr <- twListToDF(twet)
+```
+
+## Menyimpan data tweet yang sudah diambil dengan format .csv.
+```{r}
+write.csv(bisnispcr, file = "data_tweet.csv")
+```
+
+## Memilih kolom text pada data frame bisnis PCR.
+```{r}
+bisnispcr_text <- bisnispcr$text
+```
+
+## Membersihkan data dengan mengubah tulisan menjadi huruf kecil dan menghilangkan atribut yang tidak penting seperti url, username, emotikon, tanda baca, dll.
+```{r}
+tweet_bersih <- tolower(bisnispcr_text)
+tweet_bersih <- gsub("http[^[:space:]]*", "", tweet_bersih)
+tweet_bersih <- gsub("\n", "", tweet_bersih)
+tweet_bersih <- gsub(",", "", tweet_bersih)
+tweet_bersih <- gsub("&amp;", "", tweet_bersih)
+tweet_bersih <- gsub("@\\w+", "", tweet_bersih)
+tweet_bersih <- gsub("http\\w+", "", tweet_bersih)
+tweet_bersih <- gsub("[^[:alpha:][:space:]]*", "", tweet_bersih)
+tweet_bersih <- gsub(";", "", tweet_bersih)
+tweet_bersih <- gsub(":", "", tweet_bersih)
+tweet_bersih <- gsub("[[:punct:]]", "", tweet_bersih)
+tweet_bersih <- gsub("^ ", "", tweet_bersih)
+tweet_bersih <- gsub("[<].*[>]", "", tweet_bersih)
+tweet_bersih <- gsub("[\\.\\,\\;]+", "", tweet_bersih)
+tweet_bersih <- gsub("[ |\t]{2,}", "", tweet_bersih)
+tweet_bersih <- gsub("$", "", tweet_bersih)
+```
+
+## Menyimpan data tweet yang sudah dibersihkan dengan format .csv.
+```{r}
+write.csv(tweet_bersih, file = "data_bersih.csv")
+```
+
+## Untuk menyajikan kata yang paling banyak digunakan dalam bentuk wordcloud.
+```{r}
+wc <- Corpus(VectorSource(tweet_bersih))
+tweet_bersih.text.corpus <- tm_map(wc, function(x)removeWords(x, stopwords()))
+wc_plot <- wordcloud(tweet_bersih.text.corpus, min.freq = 10, colors = rainbow(100), max.words = 100)
+```
+
+## Untuk menyajikan hasil analisis sentimen berbentuk BarPlot.
+```{r}
+emosi = get_nrc_sentiment(tweet_bersih)
+barplot(colSums(emosi), las =2, col = rainbow(10), xlab = 'Kategori', ylab = 'Jumlah', main = "Analisis sentiment warga twitter mengenai isu Bisnis PCR yang dilakukan oleh pemerintah")
+```
+
+## Menyimpan data yang sudah diklasifikasi emosinya.
+```{r}
+df = data.frame(text=tweet_bersih, emosi=emosi, stringsAsFactors = FALSE)
+table(df$emosi)
+write.csv(df, file = "data_akhir.csv")
+```
+## Membuat UI Shiny
+```{r}
+# Define UI for application that draws a histogram
+ui <- fluidPage(
+
+    # Application title
+    titlePanel("Analisis sentiment warga twitter mengenai isu Bisnis PCR yang dilakukan oleh pemerintah"),
+
+    # Sidebar with a slider input for number of bins 
+    sidebarLayout(
+        sidebarPanel(
+            sliderInput("bins",
+                        "Number of bins:",
+                        min = 1,
+                        max = 50,
+                        value = 30)
+        ),
+
+        # Show a plot of the generated distribution
+        mainPanel(
+           #plotOutput("distPlot")
+          tabsetPanel(type = "tabs",
+                      tabPanel("Data Asli", DT::dataTableOutput('tabel')),
+                      tabPanel("Data Bersih", DT::dataTableOutput('tabel2')),
+                      tabPanel("Bar Plot", plotOutput("BPlot")),
+                      tabPanel("Word Cloud", plotOutput("wrdcld"))
+                      )
+        )
+    )
+)
+
+# Define server logic required to draw a histogram
+server <- function(input, output) {
+  
+  as_data <- reactive({
+    input$Update
+    isolate({
+      withProgress({
+        setProgress(message = "Memproses analisis....")
+        as_file <- input$as
+        if(!is.null(as_file)){
+          as_text <- readLines(as_file$datapath)
+        }
+        else
+        {
+          as_text <- "BarPlot merupakan gambar dari kata-kata...."
+        }
+      })
+    })
+  })
+  
+  barplot_rep <- repeatable(barplot)
+  
+  output$BPlot <- renderPlot({ withProgress({
+    setProgress(message = "Membuat barplot.....")
+    barplot(colSums(emosi), col = rainbow(10), xlab = 'Kategori', ylab = 'Jumlah', main = "Analisis Sentimen Terhadap Bisnis PCR")
+  })
+    })
+  
+  output$tabel = DT::renderDataTable({
+    DT::datatable(bisnispcr, options = list(lengthchange = FALSE))
+  })
+  
+  output$tabel2 = DT::renderDataTable({
+    DT::datatable(df, options = list(lengthchange = FALSE))
+  })
+  
+  output$wrdcld = renderPlot({
+    wordcloud(tweet_bersih.text.corpus, min.freq = 10, colors = rainbow(100), max.words = 100)
+  })
+
+}
+
+# Run the application 
+shinyApp(ui = ui, server = server)
+```
+
+
+
